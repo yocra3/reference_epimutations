@@ -6,6 +6,7 @@
 mkdir scripts
 mkdir data
 mkdir results
+mkdir figures
 
 ## Move downloaded data to data
 sudo mv /home/remote/Descargas/*.tar data/
@@ -20,5 +21,6 @@ do
   gunzip -d $pref/*.idat.gz
 done
 
-
+## Copy 450K bad probes from epimutations folder
+cp ../Epimutations_analysis/data/HM450.hg19.manifest.rds data/
 
