@@ -2,52 +2,321 @@
 title: "Comparativa de aproximaciones para definir epimutaciones usando datos de referencia"
 author: "Carlos Ruiz"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
-output: html_document
+output: 
+  html_document:
+    theme: cerulean
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+bibliography: references_quantile_ref.bib
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warnings = FALSE, message = FALSE)
+knitr::opts_chunk$set(echo = TRUE, warnings = FALSE, message = FALSE, warning = FALSE)
 ```
 
 # Introducción
 
 En los últimos años, hemos trabajado en el desarrollo del paquete [epimutacions](https://bioconductor.org/packages/release/bioc/html/epimutacions.html), un paquete de R/Bioconductor con varios métodos para detectar epimutaciones. En el artículo (en revisión actualmente en Epigenetics, si queréis os puedo pasar un copia), comparamos estos métodos y probamos su aplicación en unos datos de autismo. También implementamos los métodos usando dos configuraciones: leave-one-out y case-control. En la configuración leave-one-out comparamos una muestra contra la distribución del resto. En la configuración case-control, dividimos el dataset en muestras control y case. Las muestras control las usamos para definir la distribución de la metilación, mientras que las muestras case las usamos para detectar las epimutaciones. En el caso de case-control, seguimos detectando epimutaciones basándonos en los valores individuales de cada muestra, la diferencia es que la distribución de los valores de referencia es fija. En este trabajo inicial, sacamos diferentes conclusiones:
 
-1. De los seis métodos implementados en el paquete, quantile es el único que devuelve pocas o ninguna epimutación por muestra y todas son epimutaciones con un efecto grande. quantile es nuestra implementación de un método previamente descrito por el grupo de Andrew Sharp (incluir referencia).
-2. La configuración leave-one-out es insuficiente para detectar epimutaciones recurrentes. Si hay epimutación está presente en más de 0.5% de las muestras, con la configuración leave-one-out no la detectaremos.
-3. La falta de una base de datos de epimutaciones dificulta la aplicación del método a la práctica clínica. Al no saber si las epimutaciones que encontramos están presentes también en sanos, no podemos saber su relevancia clínica. 
+1.  De los seis métodos implementados en el paquete, quantile es el único que devuelve pocas o ninguna epimutación por muestra y todas son epimutaciones con un efecto grande. quantile es nuestra implementación de un método previamente descrito por el grupo de Andrew Sharp [@Garg2020].
+2.  La configuración leave-one-out es insuficiente para detectar epimutaciones recurrentes. Si hay epimutación está presente en más de 0.5% de las muestras, con la configuración leave-one-out no la detectaremos.
+3.  La falta de una base de datos de epimutaciones dificulta la aplicación del método a la práctica clínica. Al no saber si las epimutaciones que encontramos están presentes también en sanos, no podemos saber su relevancia clínica.
 
-Por todo esto, una de las necesidades que surgió después de este abordaje inicial fue la creación de una base de datos de epimutaciones, un estilo a gnomAD pero en epimutaciones. En la literatura, hay una aproximación inicial por parte del grupo de Andrew Sharp (incluir referencia). En este artículo, hicieron la detección de epimutaciones en un gran número de cohortes públicas. El problema es que utilizaron una implementación del quantile basado en la configuración leave-one-out, lo que estaría infraestimando la frecuencia de epimutaciones recurrentes. 
+Por todo esto, una de las necesidades que surgió después de este abordaje inicial fue la creación de una base de datos de epimutaciones, un estilo a gnomAD pero en epimutaciones. En la literatura, hay una aproximación inicial por parte del grupo de Andrew Sharp [@Garg2020]. En este artículo, hicieron la detección de epimutaciones en un gran número de cohortes públicas. El problema es que utilizaron una implementación del quantile basado en la configuración leave-one-out, lo que estaría infraestimando la frecuencia de epimutaciones recurrentes.
 
 La generación de unos datos de referencia de controles infantiles en el proyecto EpiENOD podría resolver este problema. Al fijar esta población como referencia, podríamos aplicar la configuración case-control y estimar correctamente la frecuencia de epimutaciones en otras poblaciones. En este documento, discutiré como podríamos abordar este proceso y presentaré una propuesta que facilitaría realizar esta base de datos sin problemas de compartición de datos.
 
 # Propuesta
+
 ## Metodología quantile
 
 Antes de pasar a abordar la nueva propuesta, voy a explicar como funciona el método quantile. El método quantile tiene dos pasos principales:
 
-1. Detección de outliers: se marcan como outliers todos los CpGs donde beta >99.5% + 0.15 o <0.05% - 0.15; donde 99.5% y 0.05% corresponden al valor 99.5% más alto o 0.05% más bajo de la distribución de referencia.
-2. Definición de epimutaciones: se definen como epimutaciones grupos de CpGs contiguos más cercanos de 1Kb. Cada epimutación debe tener al menos 3 CpGs.
+1.  Detección de outliers: se marcan como outliers todos los CpGs donde beta \>99.5% + 0.15 o \<0.05% - 0.15; donde 99.5% y 0.05% corresponden al valor 99.5% más alto o 0.05% más bajo de la distribución de referencia.
+2.  Definición de epimutaciones: se definen como epimutaciones grupos de CpGs contiguos más cercanos de 1Kb. Cada epimutación debe tener al menos 3 CpGs.
 
 ## quantile_reference
 
-Para la definición de la base de datos de frecuencias de epimutaciones, vamos a comparar los valores de nuestros dataset con una población de referencia (en el futuro, la que surja de EpiENOD), utilizando la configuración de case-control. En consecuencia, vamos a combinar dos datasets generados en dos momentos diferentes, por lo que es seguro que tendrán diferencias técnicas. Para corregir estas diferencias técnicas, se propone la siguiente aproximación. El proceso que se describe se llevará a cabo en todos los CpGs de manera independiente: 
+Para la definición de la base de datos de frecuencias de epimutaciones, vamos a comparar los valores de nuestros dataset con una población de referencia (en el futuro, la que surja de EpiENOD), utilizando la configuración de case-control. En consecuencia, vamos a combinar dos datasets generados en dos momentos diferentes, por lo que es seguro que tendrán diferencias técnicas. Para corregir estas diferencias técnicas, se propone la siguiente aproximación. El proceso que se describe se llevará a cabo en todos los CpGs de manera independiente:
 
-1. Definiremos para la población de referencia la distribución de los cuantiles desde el 5% al 95% (cogiendo una muestra cada 5%). Esto nos permitirá saber como se distribuyen la mayoría de las muestras de la población de referencia (excluyendo los outliers).
-2. Seleccionaremos en los datos nuevos los valores centrales (que estén entre el 5% y el 95% de la distribución).
-3. Aplicaremos una normalización de cuantiles a estos valores basándonos en la distribución de los datos de referencia (datos paso 1).
-4. Ajustaremos un modelo lineal para estimar como modificar los valores original (valores paso 2) para obtener los valores normalizados con los cuantiles (valores paso 3).
-5. Calcularemos la diferencia media entre los valores originales (valores paso 2) y los valores normalizados de los cuantiles (valores paso 3)
-6. Los valores finales corregidos se obtienen como una combinación del ajuste lineal (modelo paso 4) y la diferencia media (modelo paso 5).
+1.  Definiremos para la población de referencia la distribución de los cuantiles desde el 5% al 95% (cogiendo una muestra cada 5%). Esto nos permitirá saber como se distribuyen la mayoría de las muestras de la población de referencia (excluyendo los outliers).
+2.  Seleccionaremos en los datos nuevos los valores centrales (que estén entre el 5% y el 95% de la distribución).
+3.  Aplicaremos una normalización de cuantiles a estos valores basándonos en la distribución de los datos de referencia (datos paso 1).
+4.  Ajustaremos un modelo lineal para estimar como modificar los valores original (valores paso 2) para obtener los valores normalizados con los cuantiles (valores paso 3).
+5.  Calcularemos la diferencia media entre los valores originales (valores paso 2) y los valores normalizados de los cuantiles (valores paso 3)
+6.  Los valores finales corregidos se obtienen como una combinación del ajuste lineal (modelo paso 4) y la diferencia media (modelo paso 5).
 
 Para estimar la combinación del paso 6, se tendrá en cuenta como de outlier es un valor. En valores muy fuera de la distribución, tendrá mucho peso la diferencia media (modelo paso 5), mientras que en valores muy centrales, tendrá más peso la normalización de cuantiles (modelo paso 4). A continuación, evaluaremos el rendimiento de esta aproximación.
 
 # Evaluación
-## Métodos
+
+## Aproximaciones
+
+En este documento vamos a evaluar dos aproximaciones más además de `quantile_reference`:
+
+1.  Unadjusted: juntaremos los datos nuevos con los de referencia sin aplicar ninguna correción.
+2.  ComBat: aplicaremos ComBat para combinar los datos antes de detectar las epimutaciones. En este caso, forzaremos que los datos de referencia no se modifiquen y que solo se ajusten los datos nuevos.
+
+## Datos
+
+Usaremos los datos del GEO GSE197676 como población de referencia. Estos datos contienen 282 muestras de adultos de población general generados con el array EPIC.
+
+Para testear las aproximaciones, generaremos datos sintéticos con el paquete de Bioconductor [ramr](https://www.bioconductor.org/packages/release/bioc/html/ramr.html). La generación de datos simulados tiene los siguientes pasos:
+
+1.  Se estima la distribución de la metilación para cada CpG a partir de datos reales.
+2.  Se generan datos sintéticos a partir de estas distribuciones.
+3.  Se añaden epimutaciones de manera aleatoria en diferentes puntos del metiloma. 
+
+Este método permite añadir epimutaciones únicas y/o recurrentes y también definir la diferencia de metilación entre los muestras con epimutación y la media de la población. Generamos las simulaciones con las siguientes características:
+
+- 100 muestras en total
+- 10 epimutaciones únicas por muestra
+- 10 epimutaciones recurrentes por muestra, con cada epimutación presente en 3 muestras diferentes
+- epimutaciones con una diferencia de metilación de 0.4 respecto de la media
+
+Para generar los datos simulados usamos dos datasets de GEO, uno generado con EPIC y otro con 450K:
+
+- GSE131433: 223 adultos de una cohorte donde comparan el efecto de haber nacido de fecundación in vitro en la metilación. Estos datos están generados con EPIC.
+- GSE105018: 1658 adultos de una cohorte poblacional de gemelos. Estos datos están generados con el 450K. 
+
+Con esta aproximación, podemos ver el rendimiento de las aproximaciones si los datos están generados con el array 450K. 
+
+## Código
+
+En el siguiente chunk, se cargan los paquetes y se generan algunas funciones necesarias más adelante.
+
+```{r, message=FALSE}
+library(tidyverse)
+library(minfi)
+library(meffil)
+
+getValues <- function(res, unique_regs, nonunique_regs, all_ranges){
+  
+  epi_regs <- c(unique_regs, nonunique_regs)
+  all_neg <- all_ranges[all_ranges %outside% epi_regs]
+  
+  if(length(res) == 0){
+    return(  c(TPu = 0,
+               TPn = 0, 
+               FP = 0, 
+               TN = length(all_neg),
+               FNu = length(unique_regs), 
+               FNn = length(nonunique_reg)
+            
+    ) )
+  } else {
+  c(TPu = sum(sapply(unique(res$sample), function(x) sum(subset(res, sample == x) %over% subset(unique_regs, sample == x)))), 
+    TPn = sum(sapply(unique(res$sample), function(x) sum(subset(res, sample == x) %over% subset(nonunique_regs, sample == x)))), 
+    FP = sum(res %outside% epi_regs),
+    TN = sum(all_neg %outside%  res),
+    FNu = sum(sapply(unique(res$sample), function(x) sum(subset(unique_regs, sample == x) %outside% subset(res, sample == x)))),
+    FNn = sum(sapply(unique(res$sample), function(x) sum(subset(nonunique_regs, sample == x) %outside% subset(res, sample == x))))
+
+  ) 
+  }
+}
+```
 
 
+## EPIC
+
+```{r}
+load("../results/simulations/GSE131433.allCpGs.withNA.GenomicRatioSet.Rdata")
+epicgset <- gset[, gset$Age == "adulthood"]
+load("../results/simulations/GSE197676.allCpGs.withNA.GenomicRatioSet.Rdata")
+refgset <- gset
+
+load("../results/simulations/simulated_GRS_Epic.Rdata")
+load("../results/simulations/combat_datasets.Rdata")
+load("../results/simulations/epimutations_results.Rdata")
+
+epimut_resEpic <- list(quant_ref = epi_reference_Epic, raw = epi_raw_Epic, ComBat = epi_combatEpic)
+epimut_resGREpic <- lapply(epimut_resEpic, function(x) {
+  GR <- makeGRangesFromDataFrame(x, keep.extra.columns = TRUE)
+  GR[seqnames(GR) != 0]
+})
+```
+
+Empezaremos la comparativa con GSE131433, el dataset generado con EPIC. En primer lugar, comprobaremos la distribución de los datos:
+
+```{r}
+comb_epic_raw <- combineArrays(combineArrays(refgset, epicgset), sim.EpicGRS)
+comb_epic_raw$Dataset <- rep(c("Reference", "EPIC-original", "EPIC-simulated"), 
+                           c(ncol(refgset), ncol(epicgset), ncol(sim.EpicGRS)))
+pc_epic_raw <- meffil.methylation.pcs(getBeta(comb_epic_raw), probe.range = 40000, full.obj = TRUE)
+
+pc_epic_raw.vars <- pc_epic_raw$sdev^2/sum(pc_epic_raw$sdev^2)
+pc_epic_raw_df <- data.frame(pc_epic_raw$x[, 1:10], Dataset = comb_epic_raw$Dataset)
+
+ggplot(pc_epic_raw_df, aes(x = PC1, y = PC2, color = Dataset)) +
+   geom_point() +
+   scale_x_continuous(name = paste0("PC1 (", round(pc_epic_raw.vars[1]*100, 1), "%)")) +
+   scale_y_continuous(name = paste0("PC2 (", round(pc_epic_raw.vars[2]*100, 1), "%)")) +
+  scale_color_manual(values = c("lightblue", "blue", "grey")) +
+   theme_bw()
+```
+
+Las muestras están claramente separadas por el dataset. También vemos como las muestras de la simulación (EPIC-simulated) se agrupan con las muestras original (EPIC-original), aunque las primeras tienen mucha menos varianza. 
+
+A continuación, exploraremos el efecto de la corrección por ComBat:
+
+```{r}
+combat_epic_case <- combat_Epic[, grep("sample", colnames(combat_Epic))]
+comb_epic_analysis <- combineArrays(combineArrays(refgset, combat_epic_case), sim.EpicGRS)
+comb_epic_analysis$Dataset <- rep(c("Reference", "EPIC-ComBat", "EPIC-simulated"), 
+                           c(ncol(refgset), ncol(combat_epic_case), ncol(sim.EpicGRS)))
+pc_epic_analysis <- meffil.methylation.pcs(getBeta(comb_epic_analysis), probe.range = 40000, full.obj = TRUE)
+
+pc_epic_analysis.vars <- pc_epic_analysis$sdev^2/sum(pc_epic_analysis$sdev^2)
+pc_epic_analysis_df <- data.frame(pc_epic_analysis$x[, 1:10], Dataset = comb_epic_analysis$Dataset)
+
+ggplot(pc_epic_analysis_df, aes(x = PC1, y = PC2, color = Dataset)) +
+   geom_point() +
+   scale_x_continuous(name = paste0("PC1 (", round(pc_epic_analysis.vars[1]*100, 1), "%)")) +
+   scale_y_continuous(name = paste0("PC2 (", round(pc_epic_analysis.vars[2]*100, 1), "%)")) +
+  scale_color_manual(values = c("darkblue", "blue", "grey")) +
+   theme_bw()
+```
+ComBat corrige correctamente las diferencias de batch con la referencia. 
+
+Como hemos comentado anteriormente, ejecutamos la detección de epimutaciones usando tres aproximaciones:
+
+- Unadjusted: sin correción de batch
+- ComBat: corrigiendo el batch con ComBat antes de detectar las epimutaciones.
+- quantile_reference: corrigiendo el batch con `quantile_reference` antes de detectar las epimutaciones.
+
+A continuación, mostramos el TPR (True positive rate o sensibilidad) y FDR (False Discovery Rate) de las tres aproximaciones, para epimutaciones únicas o recurrentes:
+
+```{r, warning = FALSE}
+names(epimut_resGREpic) <- c("quantile_reference", "Unadjusted", "ComBat")
+summary_tabEpic <- sapply(epimut_resGREpic, 
+                        getValues, unique_regs = amrs.uniqueEpic,
+                        nonunique_reg = nonuniqueEpic, 
+                        all_ranges = all.rangesEpic)
+
+summary_tabEpic <- summary_tabEpic %>%
+  t() %>%
+  as.tibble(summary_tabEpic) %>%
+  mutate(Methods = factor(colnames(summary_tabEpic), levels = c("Unadjusted", "ComBat", "quantile_reference")))
+
+tabEpic <- summary_tabEpic %>%
+  mutate(TPR_Unique = TPu/(TPu + FNu),
+         TPR_Recurrent = TPn/(TPn + FNn),
+         FDR_Unique = FP / (TPu + FP), 
+         FDR_Recurrent = FP / (TPn + FP)) %>%
+  dplyr::select(Methods, starts_with(c("TPR", "FDR"))) %>%
+  gather(Name, Value, 2:5) %>%
+  mutate(Meas = sapply(strsplit(Name, "_"), `[`, 1),
+         Measure = factor(Meas, levels = c("TPR", "FDR")),
+         Ty = sapply(strsplit(Name, "_"), `[`, 2),
+         Type = factor(Ty, levels = c("Unique", "Recurrent"))) 
+
+ggplot(tabEpic, aes(x = Methods, y = Value*100)) +
+  geom_bar(stat = "identity") +
+  facet_grid(Type ~ Measure) +
+  theme_bw() +
+  xlab("") +
+  scale_y_continuous(limits = c(0, 100))
+```
 
 
+`quantile_reference` es la aproximación que presenta un mejor resultado, con un TPR cercano al 80% y el FDR más bajo, tanto con epimutaciones únicas como recurrentes. El modelo `Unadjusted` tiene una proporción mayor de falsos positivos, debido a las diferencias de batch. Por otro lado, `ComBat` elimina los outliers, resultando en los valores más bajos de TPR. 
+
+## 450K
+
+```{r}
+load("../results/simulations/GSE105018.allCpGs.withNA.GenomicRatioSet.Rdata")
+a450gset <- gset
+
+load("../results/simulations/simulated_GRS_450K.Rdata")
+epimut_res450 <- list(quant_ref = epi_reference_450, raw = epi_raw_450k, ComBat = epi_combat450)
+
+epimut_resGR450 <- lapply(epimut_res450, function(x) {
+  GR <- makeGRangesFromDataFrame(x, keep.extra.columns = TRUE)
+  GR[seqnames(GR) != 0]
+})
+```
+
+A continuación, realizamos el mismo análisis con los datos de GSE105018, el dataset generado con datos del 450K:
 
 
+```{r}
+comb_450_raw <- combineArrays(combineArrays(refgset, a450gset), sim.450GRS)
+comb_450_raw$Dataset <- rep(c("Reference", "450K-original", "450K-simulated"), 
+                           c(ncol(refgset), ncol(a450gset), ncol(sim.450GRS)))
+pc_450_raw <- meffil.methylation.pcs(getBeta(comb_450_raw), probe.range = 40000, full.obj = TRUE)
 
+pc_450_raw.vars <- pc_450_raw$sdev^2/sum(pc_450_raw$sdev^2)
+pc_450_raw_df <- data.frame(pc_450_raw$x[, 1:10], Dataset = comb_450_raw$Dataset)
+
+ggplot(pc_450_raw_df, aes(x = PC1, y = PC2, color = Dataset)) +
+   geom_point() +
+   scale_x_continuous(name = paste0("PC1 (", round(pc_450_raw.vars[1]*100, 1), "%)")) +
+   scale_y_continuous(name = paste0("PC2 (", round(pc_450_raw.vars[2]*100, 1), "%)")) +
+  scale_color_manual(values = c("lightgreen", "darkgreen", "grey")) +
+   theme_bw()
+```
+
+Como en el caso anterior, las muestras se separan por el dataset de origen y las muestras simuladas tienen menos varianza.
+
+```{r}
+combat_450_case <- combat_450[, grep("sample", colnames(combat_450))]
+comb_450_analysis <- combineArrays(combineArrays(refgset, combat_450_case), sim.450GRS)
+comb_450_analysis$Dataset <- rep(c("Reference", "450K-ComBat", "450K-simulated"), 
+                           c(ncol(refgset), ncol(combat_450_case), ncol(sim.450GRS)))
+pc_450_analysis <- meffil.methylation.pcs(getBeta(comb_450_analysis), probe.range = 40000, full.obj = TRUE)
+
+pc_450_analysis.vars <- pc_450_analysis$sdev^2/sum(pc_450_analysis$sdev^2)
+pc_450_analysis_df <- data.frame(pc_450_analysis$x[, 1:10], Dataset = comb_450_analysis$Dataset)
+
+ggplot(pc_450_analysis_df, aes(x = PC1, y = PC2, color = Dataset)) +
+   geom_point() +
+   scale_x_continuous(name = paste0("PC1 (", round(pc_450_analysis.vars[1]*100, 1), "%)")) +
+   scale_y_continuous(name = paste0("PC2 (", round(pc_450_analysis.vars[2]*100, 1), "%)")) +
+  scale_color_manual(values = c("green", "darkgreen", "grey")) +
+   theme_bw()
+```
+
+ComBat también es capaz de corregir las diferencias entre datasets.
+
+```{r}
+names(epimut_resGR450) <- c("quantile_reference", "Unadjusted", "ComBat")
+summary_tab450 <- sapply(epimut_resGR450, 
+                        getValues, unique_regs = amrs.unique450,
+                        nonunique_reg = nonunique450, 
+                        all_ranges = all.ranges450)
+
+summary_tab450 <- summary_tab450 %>%
+  t() %>%
+  as.tibble(summary_tab450) %>%
+  mutate(Methods = factor(colnames(summary_tab450), levels = c("Unadjusted", "ComBat", "quantile_reference")))
+
+tab450 <- summary_tab450 %>%
+  mutate(TPR_Unique = TPu/(TPu + FNu),
+         TPR_Recurrent = TPn/(TPn + FNn),
+         FDR_Unique = FP / (TPu + FP), 
+         FDR_Recurrent = FP / (TPn + FP)) %>%
+  dplyr::select(Methods, starts_with(c("TPR", "FDR"))) %>%
+  gather(Name, Value, 2:5) %>%
+  mutate(Meas = sapply(strsplit(Name, "_"), `[`, 1),
+         Measure = factor(Meas, levels = c("TPR", "FDR")),
+         Ty = sapply(strsplit(Name, "_"), `[`, 2),
+         Type = factor(Ty, levels = c("Unique", "Recurrent"))) 
+
+ggplot(tab450, aes(x = Methods, y = Value*100)) +
+  geom_bar(stat = "identity") +
+  facet_grid(Type ~ Measure) +
+  theme_bw() +
+  xlab("") +
+  scale_y_continuous(limits = c(0, 100))
+
+```
+
+Como con EPIC, `quantile_reference` es la aproximación que da mejores resultados a la hora de usar un dataset como referencia para detectar las epimutaciones.
+
+# Conclusión
+
+En este documento, presentamos la aproximación `quantile_reference` para detectar epimutaciones usando un dataset de referencia. Esta aproximación presenta mucho mejor rendimiento que las aproximaciones más tradicionales, como corregir los datos con ComBat. Con `quantile_reference` se permite aprovechar la referencia que se genere en EpiENoD para detectar epimutaciones en nuevas muestras y puede servir para generar una base de datos de epimutaciones en población general. Una ventaja de este método es que se basa en datos sumarizados, los cuales se pueden compartir sin restricciones con otras cohortes. 
+
+# Referencias
