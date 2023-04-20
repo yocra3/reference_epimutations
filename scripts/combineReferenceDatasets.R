@@ -3,7 +3,7 @@
 #'##############################################################################
 
 ## Docker command
-docker run -it --cpus 5.0 --memory 58Gb -v "$PWD":"$PWD" -w "$PWD" reference_epimutations:1.0  R
+docker run -it --cpus 5.0 --memory 58Gb -v "$PWD":"$PWD" -w "$PWD" yocra3/reference_epimutations:1.0  R
 
 ## Load libraries ####
 library(minfi)

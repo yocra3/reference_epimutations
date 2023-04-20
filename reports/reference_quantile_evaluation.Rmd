@@ -1,0 +1,53 @@
+---
+title: "Comparativa de aproximaciones para definir epimutaciones usando datos de referencia"
+author: "Carlos Ruiz"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warnings = FALSE, message = FALSE)
+```
+
+# Introducción
+
+En los últimos años, hemos trabajado en el desarrollo del paquete [epimutacions](https://bioconductor.org/packages/release/bioc/html/epimutacions.html), un paquete de R/Bioconductor con varios métodos para detectar epimutaciones. En el artículo (en revisión actualmente en Epigenetics, si queréis os puedo pasar un copia), comparamos estos métodos y probamos su aplicación en unos datos de autismo. También implementamos los métodos usando dos configuraciones: leave-one-out y case-control. En la configuración leave-one-out comparamos una muestra contra la distribución del resto. En la configuración case-control, dividimos el dataset en muestras control y case. Las muestras control las usamos para definir la distribución de la metilación, mientras que las muestras case las usamos para detectar las epimutaciones. En el caso de case-control, seguimos detectando epimutaciones basándonos en los valores individuales de cada muestra, la diferencia es que la distribución de los valores de referencia es fija. En este trabajo inicial, sacamos diferentes conclusiones:
+
+1. De los seis métodos implementados en el paquete, quantile es el único que devuelve pocas o ninguna epimutación por muestra y todas son epimutaciones con un efecto grande. quantile es nuestra implementación de un método previamente descrito por el grupo de Andrew Sharp (incluir referencia).
+2. La configuración leave-one-out es insuficiente para detectar epimutaciones recurrentes. Si hay epimutación está presente en más de 0.5% de las muestras, con la configuración leave-one-out no la detectaremos.
+3. La falta de una base de datos de epimutaciones dificulta la aplicación del método a la práctica clínica. Al no saber si las epimutaciones que encontramos están presentes también en sanos, no podemos saber su relevancia clínica. 
+
+Por todo esto, una de las necesidades que surgió después de este abordaje inicial fue la creación de una base de datos de epimutaciones, un estilo a gnomAD pero en epimutaciones. En la literatura, hay una aproximación inicial por parte del grupo de Andrew Sharp (incluir referencia). En este artículo, hicieron la detección de epimutaciones en un gran número de cohortes públicas. El problema es que utilizaron una implementación del quantile basado en la configuración leave-one-out, lo que estaría infraestimando la frecuencia de epimutaciones recurrentes. 
+
+La generación de unos datos de referencia de controles infantiles en el proyecto EpiENOD podría resolver este problema. Al fijar esta población como referencia, podríamos aplicar la configuración case-control y estimar correctamente la frecuencia de epimutaciones en otras poblaciones. En este documento, discutiré como podríamos abordar este proceso y presentaré una propuesta que facilitaría realizar esta base de datos sin problemas de compartición de datos.
+
+# Propuesta
+## Metodología quantile
+
+Antes de pasar a abordar la nueva propuesta, voy a explicar como funciona el método quantile. El método quantile tiene dos pasos principales:
+
+1. Detección de outliers: se marcan como outliers todos los CpGs donde beta >99.5% + 0.15 o <0.05% - 0.15; donde 99.5% y 0.05% corresponden al valor 99.5% más alto o 0.05% más bajo de la distribución de referencia.
+2. Definición de epimutaciones: se definen como epimutaciones grupos de CpGs contiguos más cercanos de 1Kb. Cada epimutación debe tener al menos 3 CpGs.
+
+## quantile_reference
+
+Para la definición de la base de datos de frecuencias de epimutaciones, vamos a comparar los valores de nuestros dataset con una población de referencia (en el futuro, la que surja de EpiENOD), utilizando la configuración de case-control. En consecuencia, vamos a combinar dos datasets generados en dos momentos diferentes, por lo que es seguro que tendrán diferencias técnicas. Para corregir estas diferencias técnicas, se propone la siguiente aproximación. El proceso que se describe se llevará a cabo en todos los CpGs de manera independiente: 
+
+1. Definiremos para la población de referencia la distribución de los cuantiles desde el 5% al 95% (cogiendo una muestra cada 5%). Esto nos permitirá saber como se distribuyen la mayoría de las muestras de la población de referencia (excluyendo los outliers).
+2. Seleccionaremos en los datos nuevos los valores centrales (que estén entre el 5% y el 95% de la distribución).
+3. Aplicaremos una normalización de cuantiles a estos valores basándonos en la distribución de los datos de referencia (datos paso 1).
+4. Ajustaremos un modelo lineal para estimar como modificar los valores original (valores paso 2) para obtener los valores normalizados con los cuantiles (valores paso 3).
+5. Calcularemos la diferencia media entre los valores originales (valores paso 2) y los valores normalizados de los cuantiles (valores paso 3)
+6. Los valores finales corregidos se obtienen como una combinación del ajuste lineal (modelo paso 4) y la diferencia media (modelo paso 5).
+
+Para estimar la combinación del paso 6, se tendrá en cuenta como de outlier es un valor. En valores muy fuera de la distribución, tendrá mucho peso la diferencia media (modelo paso 5), mientras que en valores muy centrales, tendrá más peso la normalización de cuantiles (modelo paso 4). A continuación, evaluaremos el rendimiento de esta aproximación.
+
+# Evaluación
+## Métodos
+
+
+
+
+
+
+

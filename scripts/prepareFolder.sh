@@ -21,6 +21,15 @@ do
   gunzip -d $pref/*.idat.gz
 done
 
+for file in [ data/GSE197676_RAW.tar data/GSE131433_RAW.tar ]
+do
+  pref="${file//_RAW.tar/}"
+  echo $pref
+  mkdir $pref
+  tar -xvf ${pref}_RAW.tar  -C $pref/
+  gunzip -d $pref/*.idat.gz
+done
+
 ## Copy 450K bad probes from epimutations folder
 cp ../Epimutations_analysis/data/HM450.hg19.manifest.rds data/
 
